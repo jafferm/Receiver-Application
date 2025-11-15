@@ -4,6 +4,25 @@ void ReceiverPipelineMgr::init(){
     std::cout<<"ReceiverPipelineMgr::init() starting threads"<<std::endl;
     streaming_thread = new std::thread(&ReceiverPipelineMgr::StartPlaying, this);
     error_thread = new std::thread(&ReceiverPipelineMgr::MonitorError, this);
+    temp_timer = new std::thread(&ReceiverPipelineMgr::FixedTimer, this);
+}
+
+void ReceiverPipelineMgr::FixedTimer()
+{
+    auto start_time = std::chrono::steady_clock::now();
+    int counter = 250;
+    while(true){
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        std::cout<<"FixedTimer: time since start: "<<counter<<" (ms)"<<std::endl;
+        counter+=250;
+        auto curr_time = std::chrono::steady_clock::now();
+        if(curr_time - start_time >= std::chrono::seconds(3)){
+            std::cout<<"FixedTimer: 3 secs passed stop playing"<<std::endl;
+            gst_element_set_state(pipeline, GST_STATE_PAUSED);
+            done_playing.store(true);
+            break;
+        }
+    } 
 }
 
 bool ReceiverPipelineMgr::CreateGPipeline(const Options &opt)
@@ -38,7 +57,7 @@ void ReceiverPipelineMgr::StartPlaying()
         std::cout<<"StartPlaying: Unable to set pipline to playing state"<<std::endl;
         gst_object_unref (pipeline);
     }
-    done_playing.store(true);
+   //std::cout<<"StartPlaying: reached end"<<std::endl; 
 }
 
 void ReceiverPipelineMgr::MonitorError()
@@ -47,7 +66,7 @@ void ReceiverPipelineMgr::MonitorError()
 
     while(true)
     {
-        msg = gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE, (GstMessageType)(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
+        msg = gst_bus_timed_pop_filtered(bus, 100 * GST_MSECOND, (GstMessageType)(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
         if (msg != NULL) {
             GError *err;
             gchar *debug_info;
@@ -71,9 +90,13 @@ void ReceiverPipelineMgr::MonitorError()
                     break;
             }
         }
+
+        //std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
         if(done_playing.load())
         {
             std::cout<<"MonitorError: Done Playing exiting loop"<<std::endl;
+            break;
         }
     }
     std::cout<<"MonitorError: Exited loop"<<std::endl;
